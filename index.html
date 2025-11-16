@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1024, initial-scale=1.0, user-scalable=yes">
+  <title>Log Kegiatan Kerja</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 20px;
+      zoom: 1;
+    }
+    h1 { text-align: center; color: #333; }
+    .container {
+      width: 900px;
+      margin: 20px auto;
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    input, button {
+      width: 100%;
+      padding: 50px;
+      margin: 5px 0;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 25px;
+    }
+    button { cursor: pointer; font-weight: bold; border: none; transition: 0.3s; }
+
+    .start, .break, .resume, .finish, .delete, .export {
+      padding: 20px;
+      font-size: 25px;
+      color: white;
+      border-radius: 8px;
+      margin: 5px 0;
+    }
+    .start { background: #4caf50; }
+    .break { background: #ff9800; }
+    .resume { background: #2196f3; }
+    .finish { background: #f44336; }
+    .delete { background: #555; }
+    .export { background: #009688; }
+
+    .delete-row, .edit-row {
+      padding: 4px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      color: white;
+    }
+    .delete-row { background: #d32f2f; }
+    .edit-row { background: #1976d2; margin-right: 4px; }
+
+    table {
+      width: 100%;
+      margin-top: 10px;
+      border-collapse: collapse;
+    }
+    th, td {
+      border-bottom: 1px solid #ddd;
+      padding: 8px;
+      text-align: center;
+    }
+    th { background-color: #eee; }
+
+    #summary {
+      background: #e8f5e9;
+      padding: 10px;
+      border-radius: 8px;
+      margin-top: 15px;
+      text-align: center;
+      font-weight: bold;
+      color: #2e7d32;
+    }
+
+    #aktif {
+      background: #e3f2fd;
+      color: #0d47a1;
+      border: 1px solid #90caf9;
+      padding: 10px;
+      border-radius: 8px;
+      margin-top: 10px;
+      display: none;
+      text-align: center;
+      font-weight: bold;
+    }
+
+    .filter-container {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 15px;
+      margin-bottom: 10px;
+    }
+
+    .filter-container input[type="date"], 
+    .filter-container button {
+      padding: 10px;
+      font-size: 16px;
+    }
+
+    .filter-container input[type="date"] { flex: 1; }
+
+    html { -webkit-text-size-adjust: 100%; }
+  </style>
+</head>
+<body>
+  <h1>Log Kegiatan Kerja</h1>
+  <div class="container">
+    <label for="kegiatan">Kegiatan:</label>
+    <input type="text" id="kegiatan" placeholder="Tulis kegiatan kamu...">
+    <button class="start" onclick="playBeep(700); mulaiKegiatan()">▶️ Start</button>
+    <button class="break" onclick="playBeep(500); istirahat()">☕ Istirahat</button>
+    <button class="resume" onclick="playBeep(800); selesaiIstirahat()">🔵 Selesai Istirahat</button>
+    <button class="finish" onclick="playBeep(900); selesai()">✅ Selesai</button>
+    <button class="delete" onclick="playBeep(400); hapusSemua()">🗑️ Hapus Semua Data</button>
+    <button class="export" onclick="playBeep(1000); eksporCSV()">📤 Ekspor ke CSV</button>
+
+    <div id="aktif"></div>
+    <div id="summary"></div>
+
+    <div class="filter-container">
+      <input type="date" id="filterTanggal">
+      <button onclick="playBeep(600); filterTanggal()">🔍 Tampilkan</button>
+      <button onclick="playBeep(650); tampilkanSemua()">📋 Tampilkan Semua</button>
+    </div>
+
+    <table id="logTable">
+      <thead>
+        <tr>
+          <th>No.</th>
+          <th>Tanggal</th>
+          <th>Kegiatan</th>
+          <th>Mulai</th>
+          <th>Selesai</th>
+          <th>Durasi</th>
+          <th>Status</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+<script>
+function playBeep(freq = 600, duration = 150) {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = freq;
+    gainNode.gain.value = 0.1;
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + duration / 1000);
+  } catch (e) {}
+}
+
+let waktuMulai = null,
+    kegiatanAktif = null,
+    status = "Belum mulai",
+    waktuIstirahatMulai = null,
+    totalDurasiIstirahat = 0,
+    timerInterval = null;
+
+function formatWaktu(date) {
+  const jam = String(date.getHours()).padStart(2, '0');
+  const menit = String(date.getMinutes()).padStart(2, '0');
+  const detik = String(date.getSeconds()).padStart(2, '0');
+  return `${jam}:${menit}:${detik}`;
+}
+
+function formatTanggalISO(date) {
+  const y = date.getFullYear(),
+        m = String(date.getMonth() + 1).padStart(2, '0'),
+        d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function formatTanggalLokal(date) {
+  return date.toLocaleDateString('id-ID', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+}
+// -------------------------------
+//  FUNGSI TAMPILKAN STATUS AKTIF
+// -------------------------------
+function tampilkanAktif() {
+  const aktifDiv = document.getElementById("aktif");
+
+  if (kegiatanAktif) {
+    aktifDiv.style.display = "block";
+    updateTimer();
+    clearInterval(timerInterval);
+    timerInterval = setInterval(updateTimer, 1000);
+  } else {
+    aktifDiv.style.display = "none";
+    clearInterval(timerInterval);
+  }
+}
+
+function updateTimer() {
+  if (!waktuMulai) return;
+
+  if (status === "Istirahat") {
+    document.getElementById("aktif").textContent =
+      `☕ Sedang istirahat dari: ${kegiatanAktif}`;
+    return;
+  }
+
+  const now = new Date();
+  const durasiMs = now - waktuMulai - totalDurasiIstirahat;
+  const durasiDetik = Math.floor(durasiMs / 1000);
+
+  const jam = Math.floor(durasiDetik / 3600);
+  const menit = Math.floor((durasiDetik % 3600) / 60);
+  const detik = durasiDetik % 60;
+
+  document.getElementById("aktif").textContent =
+    `🔵 Kegiatan sedang berlangsung: ${kegiatanAktif} | Durasi: ${jam}j ${menit}m ${detik}d`;
+}
+
+// -------------------------------
+//  SIMPAN STATUS AKTIF KE LOCALSTORAGE
+// -------------------------------
+function simpanStatusAktif() {
+  localStorage.setItem("kegiatanAktif", JSON.stringify({
+    kegiatan: kegiatanAktif,
+    waktuMulai: waktuMulai ? waktuMulai.getTime() : null,
+    status,
+    totalDurasiIstirahat,
+    waktuIstirahatMulai: waktuIstirahatMulai ? waktuIstirahatMulai.getTime() : null
+  }));
+}
+
+// -------------------------------
+//  MULAI KEGIATAN
+// -------------------------------
+function mulaiKegiatan() {
+  const kegiatan = document.getElementById("kegiatan").value.trim();
+
+  if (kegiatanAktif)
+    return alert("Selesaikan dulu kegiatan yang sedang berjalan.");
+
+  if (!kegiatan)
+    return alert("Silakan isi nama kegiatan terlebih dahulu.");
+
+  waktuMulai = new Date();
+  kegiatanAktif = kegiatan;
+  totalDurasiIstirahat = 0;
+  status = "Berjalan";
+
+  simpanStatusAktif();
+  tampilkanAktif();
+}
+
+// -------------------------------
+//  ISTIRAHAT
+// -------------------------------
+function istirahat() {
+  if (!kegiatanAktif || status !== "Berjalan")
+    return alert("Belum ada kegiatan yang sedang berjalan.");
+
+  waktuIstirahatMulai = new Date();
+  status = "Istirahat";
+
+  simpanStatusAktif();
+  tampilkanAktif();
+}
+
+// -------------------------------
+//  SELESAI ISTIRAHAT
+// -------------------------------
+function selesaiIstirahat() {
+  if (status !== "Istirahat")
+    return alert("Kamu belum dalam mode istirahat.");
+
+  totalDurasiIstirahat += new Date() - waktuIstirahatMulai;
+  waktuIstirahatMulai = null;
+  status = "Berjalan";
+
+  simpanStatusAktif();
+  tampilkanAktif();
+}
+
+// -------------------------------
+//  MENYELESAIKAN KEGIATAN
+// -------------------------------
+function selesai() {
+  if (!kegiatanAktif || !waktuMulai)
+    return alert("Belum ada kegiatan yang dimulai.");
+
+  const selesai = new Date();
+  const durasiMs = selesai - waktuMulai - totalDurasiIstirahat;
+  const durasiDetik = Math.floor(durasiMs / 1000);
+
+  const jam = Math.floor(durasiDetik / 3600);
+  const menit = Math.floor((durasiDetik % 3600) / 60);
+  const detik = durasiDetik % 60;
+
+  const data = {
+    id: Date.now(),
+    tanggalLokal: formatTanggalLokal(waktuMulai),
+    tanggalISO: formatTanggalISO(waktuMulai),
+    kegiatan: kegiatanAktif,
+    mulai: formatWaktu(waktuMulai),
+    selesai: formatWaktu(selesai),
+    durasiDetik,
+    durasi: `${jam}j ${menit}m ${detik}d`,
+    status: "Selesai"
+  };
+
+  simpanKeStorage(data);
+
+  // RESET
+  kegiatanAktif = null;
+  waktuMulai = null;
+  status = "Belum mulai";
+  totalDurasiIstirahat = 0;
+
+  localStorage.removeItem("kegiatanAktif");
+
+  tampilkanAktif();
+  tampilkanDataTerfilter();
+  document.getElementById("kegiatan").value = "";
+}
+
+// -------------------------------
+//  LOAD STATUS AKTIF SAAT HALAMAN DIBUKA
+// -------------------------------
+function loadStatusAktif() {
+  const aktif = JSON.parse(localStorage.getItem("kegiatanAktif"));
+
+  if (!aktif || !aktif.waktuMulai) return;
+
+  kegiatanAktif = aktif.kegiatan;
+  waktuMulai = new Date(aktif.waktuMulai);
+  status = aktif.status || "Berjalan";
+  totalDurasiIstirahat = aktif.totalDurasiIstirahat || 0;
+  waktuIstirahatMulai = aktif.waktuIstirahatMulai
+    ? new Date(aktif.waktuIstirahatMulai)
+    : null;
+
+  tampilkanAktif();
+}
+
+// -------------------------------
+//  SIMPAN & TAMPILKAN LOG
+// -------------------------------
+function simpanKeStorage(data) {
+  const logs = JSON.parse(localStorage.getItem("logKegiatan") || "[]");
+  logs.push(data);
+  localStorage.setItem("logKegiatan", JSON.stringify(logs));
+}
+
+function tambahKeTabel(data, nomor) {
+  const tabel = document.querySelector("#logTable tbody");
+  const row = tabel.insertRow();
+
+  row.insertCell(0).textContent = nomor;
+  row.insertCell(1).textContent = data.tanggalLokal;
+  row.insertCell(2).textContent = data.kegiatan;
+  row.insertCell(3).textContent = data.mulai;
+  row.insertCell(4).textContent = data.selesai;
+  row.insertCell(5).textContent = data.durasi;
+  row.insertCell(6).textContent = data.status;
+
+  const aksi = row.insertCell(7);
+  const editBtn = document.createElement("button");
+  editBtn.textContent = "✏️";
+  editBtn.classList.add("edit-row");
+  editBtn.onclick = () => editKegiatan(data.id);
+
+  const hapusBtn = document.createElement("button");
+  hapusBtn.textContent = "❌";
+  hapusBtn.classList.add("delete-row");
+  hapusBtn.onclick = () => hapusSatu(data.id);
+
+  aksi.appendChild(editBtn);
+  aksi.appendChild(hapusBtn);
+}
+
+// -------------------------------
+//  FILTER, HAPUS & EKSPOR
+// -------------------------------
+function tampilkanDataTerfilter() {
+  const tanggal = document.getElementById("filterTanggal").value
+    || formatTanggalISO(new Date());
+
+  const logs = JSON.parse(localStorage.getItem("logKegiatan") || "[]");
+  const tabel = document.querySelector("#logTable tbody");
+  tabel.innerHTML = "";
+
+  const hasil = logs.filter(log => log.tanggalISO === tanggal);
+  hasil.forEach((log, index) => tambahKeTabel(log, index + 1));
+
+  perbaruiTotalTanggal(tanggal);
+}
+
+function hapusSatu(id) {
+  if (!confirm("Yakin ingin menghapus data ini?")) return;
+
+  let logs = JSON.parse(localStorage.getItem("logKegiatan") || "[]");
+  logs = logs.filter(log => log.id !== id);
+  localStorage.setItem("logKegiatan", JSON.stringify(logs));
+  tampilkanDataTerfilter();
+}
+
+function hapusSemua() {
+  if (!confirm("Yakin ingin menghapus semua data?")) return;
+
+  localStorage.removeItem("logKegiatan");
+  document.querySelector("#logTable tbody").innerHTML = "";
+  perbaruiTotalTanggal();
+}
+
+function perbaruiTotalTanggal(tanggal) {
+  const logs = JSON.parse(localStorage.getItem("logKegiatan") || "[]");
+  const filter = tanggal || formatTanggalISO(new Date());
+
+  const totalDetik = logs
+    .filter(log => log.tanggalISO === filter)
+    .reduce((sum, log) => sum + log.durasiDetik, 0);
+
+  const jam = Math.floor(totalDetik / 3600);
+  const menit = Math.floor((totalDetik % 3600) / 60);
+  const detik = totalDetik % 60;
+
+  document.getElementById("summary").textContent =
+    `🗓️ Total Waktu: ${jam}j ${menit}m ${detik}d`;
+}
+
+// -------------------------------
+//  EKSEKUSI SAAT HALAMAN DIBUKA
+// -------------------------------
+window.onload = () => {
+  const today = formatTanggalISO(new Date());
+  document.getElementById("filterTanggal").value = today;
+
+  loadStatusAktif();
+  tampilkanDataTerfilter();
+};
+  // -------------------------------
+//  EKSPOR CSV
+// -------------------------------
+function eksporCSV() {
+  const logs = JSON.parse(localStorage.getItem("logKegiatan") || "[]");
+
+  if (logs.length === 0) {
+    alert("Tidak ada data untuk diekspor.");
+    return;
+  }
+
+  // Buat header CSV
+  let csv = "Tanggal,Kegiatan,Mulai,Selesai,Durasi,Status\n";
+
+  // Tambah isi baris CSV
+  logs.forEach(log => {
+    csv += `"${log.tanggalLokal}","${log.kegiatan}","${log.mulai}","${log.selesai}","${log.durasi}","${log.status}"\n`;
+  });
+
+  // Buat file blob
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  // Buat link download
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "log_kegiatan.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  URL.revokeObjectURL(url);
+}
+</script>
